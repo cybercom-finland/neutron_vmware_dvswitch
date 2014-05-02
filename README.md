@@ -1,6 +1,8 @@
 VMware dvSwitch ML2 Mechanism driver for ML2 plugin at OpenStack Neutron
 ========================================================================
 
+Source: https://github.com/cybercom-cloud/neutron_vmware_dvswitch
+
 This mechanism driver implements Neutron ML2 Driver API and it is used
 to manage the VMware vSphere infrastructure with a distributed virtual
 switch (VMware dvSwitch).
@@ -110,42 +112,59 @@ Request* for the given VM via the vSphere API.
 Of course, the reconfiguration can only be done *after the VM is created*.
 OpenStack and Neutron will call this driver well before
 the relevant VM does even exist. All this means that the
-driver must keep a **TODO List** of all *VM Reconfigure* requests to come.
+driver must keep a **TODO List** of all VM Reconfiguration requests
+to be done.
 
-This is done by a *separate worker thread* in some 10 seconds
+The TODO request is handled by a *separate worker thread* in some 10 seconds
 after the driver's `create_port_postcommit()` call. The exact timing
 values are configurable, with reasonable defaults.
 The worker TODO List resides in memory only.
 
-The VM Reconfiguration request might be repeated until the driver
-detects that the connection is what it should be, i.e. the *port backing*
-of the virtual ethernet is correct. This checking is done in order to
-rule out any sporadic errors in vSphere. If the reconfiguration really
-does not *ever* succeed, the TODO task will finally expire.
-The default request expiration time is 5 minutes and is adjustable.
-The driver is trying to be as robust as possible without being
+The VM reconfiguration attempts might be repeated until the driver
+detects that the VM exists and the network connection of the VM
+is what it should be, i.e. the *port backing* of the virtual ethernet
+is correct.
+
+This periodic checking with adjustable polling interval is done
+in order to rule out any sporadic errors in vSphere.
+If the reconfiguration really does not *ever* succeed,
+the failing TODO task will finally expire.
+
+The default TODO request expiration time is 5 minutes and adjustable.
+The driver is trying hard to be as robust as possible without being
 too spammy for the vSphere server.
 
-The vSphere connection and session login is first attempted at the
-driver initialization phase. The vSphere login handle is stored
+The vSphere connection and login session is first requested at the
+driver initialization phase. The vSphere session handle is stored
 in the driver's in-memory state, and checked for validity immediately
 before each real vSphere API call. The checking is done by asking
 the current time from the vSphere server. If this fails, a new login
-is attempted right away. This behaviour is in accordance with
-the vSphere API Best Practices. Usually there is a session idle timeout
-of 30 minutes in the vSphere server side.
+is attempted right away, just before the actual vSphere API call.
+This behaviour is in accordance with the vSphere API Best Practices.
+Usually there is a session idle timeout of 30 minutes
+in the vSphere server side.
 
-At the driver initialization, the relevant dvSwitch is searched
-and the driver will read the *port group information* from the dvSwitch.
-This port group data will be stored to the driver's in-memory state
-and automatically refreshed from vSphere in every 10 minutes (adjustable).
+At the driver initialization, the relevant dvSwitch is searched for
+by its name and the driver will read the *port group information*
+from the dvSwitch. This port group data will be stored to the driver's
+in-memory state. The information will be automatically refreshed
+from vSphere in every 10 minutes (adjustable).
+
+The OpenStack/Neutron network names are matched with the VMware dvSwitch
+portgroup names. The driver does care about the VLAN ID.
 
 
 
 Restrictions, shortcomings, bugs, warnings, TODO
 ------------------------------------------------
 
-* Only VLAN network type is relevant and supported.
+* **Only VLAN network type is relevant and supported.**
+
+* There is not yet support for portgroup i.e. OpenStack network
+  creation. **All networks must have pre-existing portgroups in the dvSwitch.**
+
+* **Only VMs with a single nic are supported.**
+  Or at least, the driver only supports connecting the first nic.
 
 * There is no permanent state e.g. in form of SQL tables for this driver.
   The TODO queue is volatile, because it resides only in the driver's
