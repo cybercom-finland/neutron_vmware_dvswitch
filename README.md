@@ -1,17 +1,9 @@
-
 VMware dvSwitch ML2 Mechanism driver for ML2 plugin at OpenStack Neutron
 ========================================================================
 
 This mechanism driver implements Neutron ML2 Driver API and it is used
 to manage the VMware vSphere infrastructure with a distributed virtual
 switch (VMware dvSwitch).
-
-
-
-Contact
--------
-
-Issues/Questions/Bugs: sjm@cybercom.fi
 
 
 
@@ -110,35 +102,72 @@ Random details about the implementation
 
 In VMware, to connect a Virtual Machine (VM) to a certain
 network/subnet/vlan/portgroup, you don't really configure
-the dvswitch at all. The connection is made only by reconfiguring
-the virtual network card of the VM. In VMware terms, you make
-a new *backing* for the virtual device and then issue a VM Reconfigure
-event for the given VM.
+the dvswitch at all. The connection is made by *reconfiguring
+the virtual network card* of the VM. In VMware terms, you make
+a new *backing* for the virtual device and then issue a *VM Reconfigure
+Request* for the given VM via the vSphere API.
 
-Of course, this can only be done after the VM is created.
+Of course, the reconfiguration can only be done *after the VM is created*.
 OpenStack and Neutron will call this driver well before
 the relevant VM does even exist. All this means that the
-driver must keep a TODO list of all *VM Reconfigure* requests to come.
+driver must keep a **TODO List** of all *VM Reconfigure* requests to come.
 
-This is done by a separate worker thread in some 10 seconds
-after the driver `create_port_postcommit()` call. The exact timing
+This is done by a *separate worker thread* in some 10 seconds
+after the driver's `create_port_postcommit()` call. The exact timing
 values are configurable, with reasonable defaults.
-The worker TODO list resides in memory only.
+The worker TODO List resides in memory only.
+
+The VM Reconfiguration request might be repeated until the driver
+detects that the connection is what it should be, i.e. the *port backing*
+of the virtual ethernet is correct. This checking is done in order to
+rule out any sporadic errors in vSphere. If the reconfiguration really
+does not *ever* succeed, the TODO task will finally expire.
+The default request expiration time is 5 minutes and is adjustable.
+The driver is trying to be as robust as possible without being
+too spammy for the vSphere server.
+
+The vSphere connection and session login is first attempted at the
+driver initialization phase. The vSphere login handle is stored
+in the driver's in-memory state, and checked for validity immediately
+before each real vSphere API call. The checking is done by asking
+the current time from the vSphere server. If this fails, a new login
+is attempted right away. This behaviour is in accordance with
+the vSphere API Best Practices. Usually there is a session idle timeout
+of 30 minutes in the vSphere server side.
 
 At the driver initialization, the relevant dvSwitch is searched
 and the driver will read the *port group information* from the dvSwitch.
-This port group data will be stored in memory and automatically refreshed
-from vSphere in every 10 minutes (adjustable).
+This port group data will be stored to the driver's in-memory state
+and automatically refreshed from vSphere in every 10 minutes (adjustable).
 
 
 
-Restrictions
-------------
+Restrictions, shortcomings, bugs, warnings, TODO
+------------------------------------------------
 
-There is no permanent state e.g. in form of SQL tables for this driver.
-This means that the TODO queue is volatile and will be lost
-on Neutron server restart.
+* Only VLAN network type is relevant and supported.
 
-So far the driver has only been tested with vSphere version 5.1.
-There should really be no reason why it would not run with any
-newer version as well. Please give us feedback.
+* There is no permanent state e.g. in form of SQL tables for this driver.
+  The TODO queue is volatile, because it resides only in the driver's
+  in-memory state. It will be lost on Neutron server restart.
+  **Care should be taken to not restart the Neutron server while there are
+  any VM creation in progress.**
+
+* If the TODO worker thread dies for any reason,
+  because of a Python Exception for example, it will go unnoticed.
+  The driver will not recover from this situation by itself.
+  Neutron server restart is needed in this case.
+  **There really should be a watchdog for the TODO worker thread.**
+
+* So far the driver has only been tested with vSphere version 5.1.
+  There should really be no reason why it would not run with any
+  newer version as well. **Please give us feedback.**
+
+
+
+Contact
+-------
+
+Issues/Questions/Bugs: sjm@cybercom.fi
+
+Thanks and sorry.
