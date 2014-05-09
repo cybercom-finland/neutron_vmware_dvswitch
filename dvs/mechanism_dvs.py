@@ -20,6 +20,7 @@
 
 """Implentation of VMware dvSwitch ML2 Mechanism driver for Neutron"""
 
+
 import time
 import threading
 import random
@@ -39,8 +40,14 @@ LOG = logging.getLogger(__name__)
 MECHANISM_VERSION = 0.42
 NET_TYPES_SUPPORTED = ('vlan',)
 
+
+# Do some test fuzzing in worker thread?
 TEST_FUZZING = True
-#TEST_FUZZING = False
+# Compared against random.random() which returns a float between 0..1
+# Use greater than 1.0 to disable a particular fuzzing.
+TEST_FUZZ_WORKER_DIE = 2.0
+TEST_FUZZ_WORKER_BLOCK = 2.0
+TEST_FUZZ_DISCONNECT = 0.98
 
 
 ML2_DVS = [
@@ -61,7 +68,7 @@ ML2_DVS = [
     cfg.StrOpt('vsphere_path', default='/sdk',
                help=_('The vSphere API path, usually /sdk')),
 
-    cfg.IntOpt('dvs_refresh_interval', default=600,
+    cfg.IntOpt('dvs_refresh_interval', default=300,
                help=_('How often to refresh dvSwitch portgroup information'
                       ' from vSphere')),
 
@@ -76,7 +83,7 @@ ML2_DVS = [
                       ' to check a particular VM')),
     cfg.IntOpt('todo_expire_time', default=300,
                help=_('How long to keep trying for a particular VM')),
-    cfg.IntOpt('todo_vsphere_keepalive', default=10,
+    cfg.IntOpt('todo_vsphere_keepalive', default=300,
                help=_('How often to ask vSphere server for timestamp'
                       ' in order to keep login session alive')),
 ]
@@ -113,7 +120,10 @@ class TodoList():
         if not now: now = time.time()
         with self.lock:
             for entry in self.todo:
-                if entry.done or now >= entry.expiretime:
+                if entry.done:
+                    self.todo.remove(entry)
+                if now >= entry.expiretime:
+                    LOG.warn(_("Expired todo task: %s" % repr(entry)))
                     self.todo.remove(entry)
         return self
 
@@ -165,6 +175,12 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
             self.si = None
             self.todo = TodoList()
 
+            self.worker_local = threading.local()
+            self.watchdog = threading.Thread(target=self._todo_watchdog,
+                                             name="ml2_mech_dvs_watchdog")
+            self.watchdog.daemon = True
+            self.watchdog_local = threading.local()
+
         except Exception as error:
             msg = (_("Could not Initialize parameters: %(err)s") %
                      {'err': error})
@@ -180,25 +196,12 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
         now = time.time()
         self._init_si()
         self._update_dvs()
-        self.pg_ts = now
-        self.worker_local = threading.local()
+        self.pg_ts = now 
         self._start_worker(now)
+        self.watchdog.start()
         LOG.info(_("dvs driver initialized: dvs_name=%s dvs_refresh=%d" %
                    (self.dvs_name, self.dvs_refresh_interval)))
         return self
-
-
-    def _check_worker(self):
-        now = time.time()
-        if now > self.todo_watchdog + 3 * self.todo_polling_interval:
-            LOG.info(_("Worker watchdog expired!"))
-            if self.worker.is_alive():
-                LOG.info(_("My worker is still alive! Is it hung?"))    
-            else:
-                LOG.info(_("My worker thread is dead!"))
-            self._start_worker(now)
-            return False
-        return True
 
 
     def _start_worker(self, now):
@@ -210,14 +213,27 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
         return self
 
 
+    def _todo_eligible(self):
+        # Is this thread eligible for working,
+        # or possibly forgotten and abandoned by main program?
+
+        if self.worker.ident == self.worker_local.thread_id:
+            return True
+        else:
+            # The main thread has started another worker and it is not me
+            LOG.info(_("abandoned worker thread %d stopping" %
+                       self.worker_local.thread_id))
+            return False
+
+
     def _todo_worker(self):
         # Record our own thread-id to thread-local storage
-        self.worker_local.worker_id = self.worker.ident
+        self.worker_local.thread_id = self.worker.ident
 
-        LOG.info(_("TODO worker thread %d started with"
+        LOG.info(_("Worker %d started:"
                    " loop interval: %d initial wait: %d"
                    " polling interval: %d expire time: %d" %
-                   (self.worker_local.worker_id,
+                   (self.worker_local.thread_id,
                     self.todo_loop_interval, self.todo_initial_wait,
                     self.todo_polling_interval, self.todo_expire_time)))
 
@@ -227,25 +243,29 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
             # Do not busyloop
             time.sleep(self.todo_loop_interval)
 
+            # Test fuzzing, deliberately generate random failures in worker
             if TEST_FUZZING:
-                if random.random() > 0.95:
+                if random.random() > TEST_FUZZ_WORKER_DIE:
                     LOG.info(_("accidentally, worker %d dies" %
-                               self.worker_local.worker_id))
+                               self.worker_local.thread_id))
                     raise DvsRuntimeError()
 
-                if random.random() > 0.95:
-                    LOG.info(_("accidentally, worker %d blocks" %
-                               self.worker_local.worker_id))
-                    sleep(600)
+                if random.random() > TEST_FUZZ_WORKER_BLOCK:
+                    LOG.info(_("suddenly, worker %d blocks" %
+                               self.worker_local.thread_id))
+                    time.sleep(300)
 
+                if random.random() > TEST_FUZZ_DISCONNECT:
+                    LOG.info(_("accidentally, disconnect from vsphere"))
+                    try:
+                        Disconnect(self.si)
+                    except Exception as error:
+                        msg = (_("Disconnect failed: %(err)s") %
+                               {'err': error})
+                        LOG.exception(msg)
+            # EOF (End Of Fuzzing)
 
-            # Is this thread forgotten and abandoned by main program?
-            if self.worker.ident != self.worker_local.worker_id:
-                # The main thread has started another worker and it is not me
-                LOG.info(_("abandoned worker thread %d stopping" %
-                           self.worker_local.worker_id))
-                return None
-
+            if not self._todo_eligible(): return None
             now = time.time()
 
             # Update watchdog timestamp
@@ -262,12 +282,14 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
             # Check my work list
             tasks = self.todo.get_tasks()
             if tasks: LOG.info(_("Worker %d found %d doable tasks" %
-                                 (self.worker_local.worker_id, len(tasks))))
+                                 (self.worker_local.thread_id, len(tasks))))
 
             # Do the needful
             for entry in tasks:
+                if not self._todo_eligible(): return None
+
                 LOG.info(_("Worker %d trying to connect vm %s to network %s") %
-                         (self.worker_local.worker_id,
+                         (self.worker_local.thread_id,
                           entry.item[0], entry.item[1]))
 
                 if self._connect_vm(entry.item[0], entry.item[1]):
@@ -275,15 +297,44 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
                 else:
                     entry.starttime = now + self.todo_polling_interval
 
+                # Do not spam vsphere
+                time.sleep(1)
+
+
+    def _check_worker(self):
+        now = time.time()
+        if now > self.todo_watchdog + 3 * self.todo_polling_interval:
+            LOG.info(_("Worker watchdog expired!"))
+            if self.worker.is_alive():
+                LOG.info(_("My worker is still alive! Is it hung?"))    
+            else:
+                LOG.info(_("My worker thread is dead!"))
+            self._start_worker(now)
+            return False
+        return True
+
+
+    def _todo_watchdog(self):
+        self.watchdog_local.thread_id = self.watchdog.ident
+        LOG.info(_("watchdog thread %d started" %
+                   self.watchdog_local.thread_id))
+
+        while True:
+            # Do not busyloop
+            time.sleep(5)
+
+            try:
+                if not self._check_worker():
+                    LOG.info(_("watchdog started a new worker"))
+
+            except Exception as error:
+                msg = (_("Wat? Watchdog check failed, error: %(err)s") %
+                       {'err': error})
+                LOG.info(msg)
+
 
     def _check_si(self):
-        if TEST_FUZZING:
-            if random.random() > 0.90:
-                LOG.info(_("accidentally, we disconnect from vsphere"))
-                self.si.Disconnect()
-                return self
-
-        LOG.info(_("Asking vsphere time to keepalive session"))
+        LOG.info(_("worker: vsphere keepalive"))
         try:
             ret = self.si.CurrentTime()
         except Exception as error:
@@ -414,8 +465,7 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
         try:
             myvm = self._find_vm(vm_uuid)
             if not myvm:
-                LOG.info(_("VM not found yet. Never gonna give you up."
-                           " Just kidding, eventually I will."))
+                LOG.info(_("VM not found yet. Going to retry."))
                 return None
 
         except Exception as error:
@@ -439,11 +489,10 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
             return False
 
         if nic[0].backing.port.portgroupKey == self.pg_key[pg_name]:
-            LOG.info(_("*** VM %s nic0 port group OK") %
+            LOG.info(_("*** VM %s nic0 port group OK. Task complete.") %
                      vm_uuid)
             # Connection has been successful, return True
             return True
-
         else:
             LOG.info(_("*** Changing VM %s nic0 port group to %s") %
                      (vm_uuid, pg_name))
@@ -459,8 +508,9 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
                 veth = type(nic[0])()
                 veth.key = nic[0].key
 
-                # MAC address is preserved
+                # MAC address has to be preserved
                 veth.macAddress = nic[0].macAddress
+
                 # New backing - with the desired port group
                 veth.backing = backing
 
@@ -496,7 +546,6 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
         """Sanity check for port creation/connection"""
 
         LOG.info(_("create_port_precommit called, sanity check."))
-        self._check_worker()
 
         port = mech_context.current
         net = mech_context.network.current
@@ -522,7 +571,6 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
         """Associate the assigned vlan/portgroup to the VM."""
 
         LOG.info(_("create_port_postcommit called, create a job."))
-        self._check_worker()
 
         now = time.time()
         port = mech_context.current
@@ -543,97 +591,81 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
     def delete_port_precommit(self, mech_context):
         """Noop now, it is left here for future."""
         #LOG.info(_("delete_port_precommit: called"))
-        self._check_worker()
 
 
     def delete_port_postcommit(self, mech_context):
         """Noop now, it is left here for future."""
-        LOG.info(_("delete_port_postcommit: called"))
-        self._check_worker()
+        #LOG.info(_("delete_port_postcommit: called"))
 
 
     def update_port_precommit(self, mech_context):
         """Noop now, it is left here for future."""
         #LOG.info(_("update_port_precommit: called"))
-        self._check_worker()
 
 
     def update_port_postcommit(self, mech_context):
         """Noop now, it is left here for future."""
-        LOG.info(_("update_port_postcommit: called"))
-        self._check_worker()
+        #LOG.info(_("update_port_postcommit: called"))
 
 
     def create_network_precommit(self, mech_context):
         """Noop now, it is left here for future."""
         #LOG.info(_("create_network_precommit: called"))
-        self._check_worker()
 
 
     def create_network_postcommit(self, mech_context):
         """Noop now, it is left here for future."""
-        LOG.info(_("create_network_postcommit: called"))
-        self._check_worker()
+        #LOG.info(_("create_network_postcommit: called"))
 
 
     def delete_network_precommit(self, mech_context):
         """Noop now, it is left here for future."""
         #LOG.info(_("delete_network_precommit: called"))
-        self._check_worker()
 
 
     def delete_network_postcommit(self, mech_context):
         """Noop now, it is left here for future."""
-        LOG.info(_("delete_network_postcommit: called"))
-        self._check_worker()
+        #LOG.info(_("delete_network_postcommit: called"))
 
 
     def update_network_precommit(self, mech_context):
         """Noop now, it is left here for future."""
         #LOG.info(_("update_network_precommit: called"))
-        self._check_worker()
 
 
     def update_network_postcommit(self, mech_context):
         """Noop now, it is left here for future."""
-        LOG.info(_("update_network_postcommit: called"))
-        self._check_worker()
+        #LOG.info(_("update_network_postcommit: called"))
 
 
     def create_subnet_precommit(self, mech_context):
         """Noop now, it is left here for future."""
         #LOG.info(_("create_subnet_precommit: called"))
-        self._check_worker()
 
 
     def create_subnet_postcommit(self, mech_context):
         """Noop now, it is left here for future."""
-        LOG.info(_("create_subnet_postcommit: called"))
-        self._check_worker()
+        #LOG.info(_("create_subnet_postcommit: called"))
 
 
     def delete_subnet_precommit(self, mech_context):
         """Noop now, it is left here for future."""
         #LOG.info(_("delete_subnet_precommit: called"))
-        self._check_worker()
 
 
     def delete_subnet_postcommit(self, mech_context):
         """Noop now, it is left here for future."""
-        LOG.info(_("delete_subnet_postcommit: called"))
-        self._check_worker()
+        #LOG.info(_("delete_subnet_postcommit: called"))
 
 
     def update_subnet_precommit(self, mech_context):
         """Noop now, it is left here for future."""
         #LOG.info(_("update_subnet_precommit(self: called"))
-        self._check_worker()
 
 
     def update_subnet_postcommit(self, mech_context):
         """Noop now, it is left here for future."""
-        LOG.info(_("update_subnet_postcommit: called"))
-        self._check_worker()
+        #LOG.info(_("update_subnet_postcommit: called"))
 
 
 # EOF mechanism_dvs.py
