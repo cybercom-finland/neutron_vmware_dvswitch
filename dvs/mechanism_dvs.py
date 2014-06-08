@@ -42,7 +42,7 @@ NET_TYPES_SUPPORTED = ('vlan',)
 
 
 # Do some test fuzzing in worker thread?
-TEST_FUZZING = True
+TEST_FUZZING = False
 # Compared against random.random() which returns a float between 0..1
 # Use greater than 1.0 to disable a particular fuzzing.
 TEST_FUZZ_WORKER_DIE = 2.0
