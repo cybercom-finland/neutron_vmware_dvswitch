@@ -172,11 +172,7 @@ Restrictions, shortcomings, bugs, warnings, TODO
   **Care should be taken to not restart the Neutron server while there are
   any VM creation in progress.**
 
-* If the TODO worker thread dies for any reason,
-  because of a Python Exception for example, it will go unnoticed.
-  The driver will not recover from this situation by itself.
-  Neutron server restart is needed in this case.
-  **There really should be a watchdog for the TODO worker thread.**
+* Edit: There is now a watchdog thread capable of restarting the worker.
 
 * So far the driver has only been tested with vSphere version 5.1.
   There should really be no reason why it would not run with any
@@ -189,4 +185,4 @@ Contact
 
 Issues/Questions/Bugs: sjm@cybercom.fi
 
-Thanks and sorry.
+EOF
