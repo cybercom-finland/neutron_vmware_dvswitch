@@ -155,7 +155,7 @@ None.
 References
 ==========
 
-https://github.com/cybercom-cloud/neutron_vmware_dvswitch
+https://github.com/cybercom-finland/neutron_vmware_dvswitch
 
 https://github.com/vmware/pyvmomi
 
