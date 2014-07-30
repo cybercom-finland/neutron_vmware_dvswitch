@@ -71,6 +71,8 @@ ML2_DVS = [
     cfg.IntOpt('dvs_refresh_interval', default=300,
                help=_('How often to refresh dvSwitch portgroup information'
                       ' from vSphere')),
+    cfg.StrOpt('portgroup_prefix', default='',
+               help=_('The prefix to prepend to port group names in vSphere')),
 
     cfg.IntOpt('todo_loop_interval', default=2,
                help=_('How often to poll TODO list for'
@@ -163,7 +165,7 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
 
             self.dvs_name = cfg.CONF.ml2_dvs.dvs_name
             self.dvs_refresh_interval = int(cfg.CONF.ml2_dvs.dvs_refresh_interval)
-
+            self.portgroup_prefix = cfg.CONF.ml2_dvs.portgroup_prefix
             self.todo_loop_interval = int(cfg.CONF.ml2_dvs.todo_loop_interval)
             self.todo_initial_wait = int(cfg.CONF.ml2_dvs.todo_initial_wait)
             self.todo_polling_interval = int(cfg.CONF.ml2_dvs.todo_polling_interval)
@@ -438,7 +440,6 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
         self.pg_key = {}
         self.pg_name = {}
         for pg in mydvs.portgroup:
-            print repr((pg.config.name, pg.key))
             self.pg_key[pg.config.name] = pg.key
             self.pg_name[pg.key] = pg.config.name
 
@@ -576,7 +577,7 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
         port = mech_context.current
         net = mech_context.network.current
 
-        mypg = net.get('name')
+        mypg = self.portgroup_prefix + net.get('name')
         vm_uuid = port.get('device_id')
 
         # The worker thread will really handle the VM network reconfig.
