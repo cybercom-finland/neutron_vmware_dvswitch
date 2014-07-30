@@ -551,7 +551,7 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
         port = mech_context.current
         net = mech_context.network.current
 
-        myname = net.get('name')
+        myname = self.portgroup_prefix + net.get('name')
         if not self.pg_key.has_key(myname):
             msg = (_("Could not find portgroup name \"%s\"") % myname)
             LOG.exception(msg)
