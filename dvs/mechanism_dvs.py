@@ -510,6 +510,7 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
                 veth.key = nic[0].key
 
                 # MAC address has to be preserved
+                veth.addressType = 'Manual'
                 veth.macAddress = nic[0].macAddress
 
                 # New backing - with the desired port group
