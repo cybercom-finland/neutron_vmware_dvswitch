@@ -398,10 +398,15 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
             self.pg_ts = time.time()
             self.dvs_lock.release()
         except Exception as error:
-            self.dvs_uuid = None
+            # Will try again after dvs_refresh_interval
             self.pg_ts = time.time()
-            self.pg_key = None
-            self.pg_name = None
+            # Retain the old cache
+            if not self.dvs_uuid:
+                self.dvs_uuid = None
+            if not self.pg_key:
+                self.pg_key = None
+            if not self.pg_name:
+                self.pg_name = None
             self.dvs_lock.release()
             msg = (_("dvs update failed: %(err)s") %
                      {'err': error})
