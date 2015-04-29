@@ -19,7 +19,7 @@ def read(fname):
 
 setup(
    name='ml2_dvs',
-   version='0.1',
+   version='0.2',
    description='VMware dvSwitch mech driver for OpenStack Neutron ML2 plugin',
    author='Cybercom Finland',
    author_email='sjm@cybercom.fi',
