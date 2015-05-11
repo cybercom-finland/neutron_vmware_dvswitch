@@ -1,12 +1,11 @@
 VMware dvSwitch ML2 Mechanism driver for ML2 plugin at OpenStack Neutron
 ========================================================================
 
-Source: https://github.com/cybercom-cloud/neutron_vmware_dvswitch
+Source: https://github.com/cybercom-finland/neutron_vmware_dvswitch
 
 This mechanism driver implements Neutron ML2 Driver API and it is used
 to manage the VMware vSphere infrastructure with a distributed virtual
 switch (VMware dvSwitch).
-
 
 
 Prerequisites
@@ -178,11 +177,10 @@ Restrictions, shortcomings, bugs, warnings, TODO
   There should really be no reason why it would not run with any
   newer version as well. **Please give us feedback.**
 
+* The driver works only if Neutron server process is single threaded.
 
 
 Contact
 -------
 
-Issues/Questions/Bugs: sjm@cybercom.fi
-
-EOF
+Issues/Questions/Bugs: GitHub
