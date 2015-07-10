@@ -442,11 +442,14 @@ class VmwareDvswitchMechanismDriver(api.MechanismDriver):
             LOG.exception(msg)
             raise DvsRuntimeError(msg=msg)
 
-        self.pg_key = {}
-        self.pg_name = {}
+        pg_key = {}
+        pg_name = {}
         for pg in mydvs.portgroup:
-            self.pg_key[pg.config.name] = pg.key
-            self.pg_name[pg.key] = pg.config.name
+            pg_key[pg.config.name] = pg.key
+            pg_name[pg.key] = pg.config.name
+        # Atomic
+        self.pg_key = pg_key
+        self.pg_name = pg_name
 
         return self
 
