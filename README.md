@@ -21,6 +21,14 @@ https://github.com/vmware/pyvmomi
 The pyVmomi SDK is a nice and clean Python API implementation
 for **VMware vSphere API** - highly recommended.
 
+VMware vCenter vSphere Permissions
+VIRTUAL MACHINE
+		CONFIGURATION
+				MODIFY DEVICE SETTINGS
+				SETTINGS
+HOST
+		CONFIGURATION
+				SYSTEM MANAGEMENT
 
 
 Deployment
