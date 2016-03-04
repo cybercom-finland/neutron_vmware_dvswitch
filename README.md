@@ -23,12 +23,12 @@ for **VMware vSphere API** - highly recommended.
 
 VMware vCenter vSphere Permissions
 VIRTUAL MACHINE
-		CONFIGURATION
-				MODIFY DEVICE SETTINGS
-				SETTINGS
+        CONFIGURATION
+                MODIFY DEVICE SETTINGS
+                SETTINGS
 HOST
-		CONFIGURATION
-				SYSTEM MANAGEMENT
+        CONFIGURATION
+                SYSTEM MANAGEMENT
 
 
 Deployment
