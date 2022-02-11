@@ -1,3 +1,5 @@
+Project archived.
+
 VMware dvSwitch ML2 Mechanism driver for ML2 plugin at OpenStack Neutron
 ========================================================================
 
